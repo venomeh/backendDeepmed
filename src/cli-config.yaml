@@ -1,0 +1,8 @@
+default_project: deepmed1
+projects:
+    - name: deepmed1
+      project_id: p_5vj390y6o4x
+      url: wss://deepmed-puz7fu3h.livekit.cloud
+      api_key: APIyAPx2wjiqEHf
+      api_secret: CeJewRjDOeWUSCQSBTkZRRl8NQzgokb9FaqenYS1kekH
+device_name: abdullah-pc

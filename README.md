@@ -1,0 +1,1 @@
+https://meet.livekit.io/?url=wss://deepmed-puz7fu3h.livekit.cloud
