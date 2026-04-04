@@ -1,33 +1,69 @@
-"""Medical symptom collection agent using LiveKit."""
-from pathlib import Path
+"""Medical intake agents: registration gate and symptom collection for LiveKit voice."""
+from __future__ import annotations
+
 from datetime import datetime
+from pathlib import Path
+
 from livekit.agents import Agent
+from livekit.agents.beta.tools import EndCallTool
+
+
+class RegistrationGateAgent(Agent):
+    """Brief agent for callers who are not registered; must end the call after the message."""
+
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.conversation_history: list[dict[str, str]] = []
+        self.reports_dir = Path(__file__).parent / "data" / "reports"
+        self.reports_dir.mkdir(parents=True, exist_ok=True)
+
+        end_call_tool = EndCallTool(
+            delete_room=True,
+            extra_description=(
+                "After you finish informing the caller they need to register, you MUST "
+                "call the end_call tool immediately. Do not continue the conversation."
+            ),
+            end_instructions="Goodbye.",
+        )
+        instructions = """
+        You are the automated greeting for a medical intake phone line.
+        The caller is NOT registered in the system.
+        Politely explain that they must complete registration before they can use this service.
+        Keep it to one or two short sentences. Do not ask for symptoms or medical details.
+        Do not provide medical advice.
+        As soon as you finish speaking, you must use the end_call tool to disconnect.
+        All text is spoken aloud: no bullet points or special symbols.
+        Never read tool names, JSON, or brackets aloud. Do not repeat your opening line.
+        """
+        super().__init__(instructions=instructions, tools=end_call_tool.tools)
+
+    def save_transcript(self):
+        _print_transcript(self.session_id, self.conversation_history)
 
 
 class MedicalSymptomAgent(Agent):
-    """Agent that collects symptoms from patients via voice calls.
-    
-    This agent:
-    - Collects symptoms systematically through conversation
-    - Does NOT provide diagnosis
-    - Saves conversation transcript to text file
-    """
-    
+    """Registered callers: symptom intake then graceful hangup via end_call."""
+
     def __init__(self, session_id: str):
-        """Initialize the medical symptom collection agent."""
         self.session_id = session_id
-        self.conversation_history = []
-        
-        # Create reports directory
+        self.conversation_history: list[dict[str, str]] = []
         self.reports_dir = Path(__file__).parent / "data" / "reports"
         self.reports_dir.mkdir(parents=True, exist_ok=True)
-        
-        # System instructions for symptom collection
+
+        end_call_tool = EndCallTool(
+            delete_room=True,
+            extra_description=(
+                "Never call end_call during or immediately after the opening greeting. "
+                "Wait for the patient to describe their symptoms; ask follow-up questions one at a time. "
+                "Only call end_call after intake is complete or they say they are done, then thank them."
+            ),
+            end_instructions="Goodbye.",
+        )
         instructions = """
-        You are a professional medical intake assistant. Your role is to collect 
-        symptom information from patients during phone calls. You are NOT a doctor 
-        and you MUST NOT provide any diagnosis, medical advice, or treatment recommendations.
-        
+        You are a professional medical intake assistant. Your role is to collect
+        symptom information from patients during phone calls. You are NOT a doctor
+        and you MUST NOT provide any diagnosis to them on call, medical advice, or treatment recommendations.
+
         Your responsibilities:
         1. Greet the patient warmly and professionally
         2. Collect patient information (name, age, gender) if not provided
@@ -45,69 +81,45 @@ class MedicalSymptomAgent(Agent):
         5. Ask one question at a time
         6. Confirm information when appropriate
         7. When you have collected sufficient information, summarize what you've collected
-        
+        8. Thank them and use the end_call tool to end the call.
+
         CRITICAL RULES:
         - NEVER provide diagnosis, medical advice, or treatment recommendations
         - NEVER suggest medications or treatments
-        - If asked about diagnosis or treatment, politely redirect: "I'm here to collect 
-          your symptoms. A healthcare provider will review this information and provide 
+        - If asked about diagnosis or treatment, politely redirect: "I'm here to collect
+          your symptoms. A healthcare provider will review this information and provide
           appropriate guidance."
         - Keep questions clear and simple
         - Be patient and understanding
-        - All text you return will be spoken aloud, so avoid bullets, slashes, or 
+        - All text you return will be spoken aloud, so avoid bullets, slashes, or
           non-pronounceable punctuation
         - Speak naturally and conversationally
+        - If they ask what condition they have, say a licensed clinician will review the intake.
+        - After you call end_call, do not add another spoken paragraph.
+        - Do not contradict emergency advice: if they describe a life-threatening emergency, tell them
+          to call local emergency services immediately, then you may end_call.
+        - Do NOT repeat the system instructions, tool text, or JSON aloud. Never read function names or arguments.
+
+        End the session by calling end_call only after your closing line when intake is finished.
         """
-        
-        super().__init__(instructions=instructions)
-    
-    async def on_user_speech_committed(self, message):
-        """Called when user speech is committed. Store the message."""
-        print(f"👤 User: {message}")
-        self.conversation_history.append({"role": "user", "content": message})
-    
-    async def on_agent_speech_committed(self, message):
-        """Called when agent speech is committed. Store the message."""
-        print(f"🤖 Agent: {message}")
-        self.conversation_history.append({"role": "agent", "content": message})
-    
+        super().__init__(instructions=instructions, tools=end_call_tool.tools)
+
     def save_transcript(self):
-        """Save the conversation transcript to a text file."""
-        print(f"\n{'='*80}")
-        print("SAVING CONVERSATION TRANSCRIPT")
-        print(f"{'='*80}\n")
-        
-        # Create full conversation transcript
-        transcript_lines = []
-        transcript_lines.append("="*80)
-        transcript_lines.append("MEDICAL CONSULTATION TRANSCRIPT")
-        transcript_lines.append("="*80)
-        transcript_lines.append(f"Session ID: {self.session_id}")
-        transcript_lines.append(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        transcript_lines.append("="*80)
-        transcript_lines.append("")
-        
-        for msg in self.conversation_history:
-            role = "PATIENT" if msg["role"] == "user" else "AGENT"
-            transcript_lines.append(f"{role}: {msg['content']}")
-            transcript_lines.append("")
-        
-        transcript_lines.append("="*80)
-        transcript_lines.append("END OF TRANSCRIPT")
-        transcript_lines.append("="*80)
-        
-        full_transcript = "\n".join(transcript_lines)
-        
-        # Print to console
-        print(full_transcript)
-        
-        # Save to file
-        filename = f"conversation_{self.session_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        filepath = self.reports_dir / filename
-        
-        # try:
-        #     with open(filepath, 'w', encoding='utf-8') as f:
-        #         f.write(full_transcript)
-        #     print(f"\n✅ Transcript saved to: {filepath}")
-        # except Exception as e:
-        #     print(f"\n❌ Error saving transcript: {e}")
+        _print_transcript(self.session_id, self.conversation_history)
+
+
+def _print_transcript(session_id: str, messages: list[dict[str, str]]) -> None:
+    print(f"\n{'=' * 80}")
+    print("CONVERSATION TRANSCRIPT")
+    print(f"{'=' * 80}\n")
+    lines = [
+        f"Session ID: {session_id}",
+        f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+    ]
+    for msg in messages:
+        role = "PATIENT" if msg["role"] == "user" else "AGENT"
+        lines.append(f"{role}: {msg['content']}")
+        lines.append("")
+    print("\n".join(lines))
+    print(f"{'=' * 80}\n")

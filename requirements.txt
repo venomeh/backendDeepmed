@@ -5,3 +5,4 @@ livekit-plugins-openai
 openai
 torch
 python-dotenv
+pymongo[srv]
